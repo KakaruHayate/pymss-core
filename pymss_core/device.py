@@ -142,6 +142,7 @@ class DeviceProfile:
     cpu_shim: bool = False
     sdpa_shim: bool = False
     rope_shim: bool = False
+    rope_kernel_shim: bool = False
     scatter_add: bool = True
     dilated_conv_allowed: frozenset[tuple[int, int]] = frozenset()
     amp: bool = True
@@ -257,7 +258,7 @@ _PROFILES: dict[str, DeviceProfile] = {
     # complex-by-real rel 0, complex cat/fill/copy, ``_thnn_fused_gru_cell``,
     # ``_native_multi_head_attention`` -- so only the three gaps annotated below
     # are left; every other flag keeps its native default.
-    MOORE: DeviceProfile(MOORE, "musa", plugin="torch_musa", fft_dtype_shim=True, scatter_add=False, amp=False, multi_device=False),
+    MOORE: DeviceProfile(MOORE, "musa", plugin="torch_musa", fft_dtype_shim=True, scatter_add=False, rope_kernel_shim=True, amp=False, multi_device=False),
     MPS: DeviceProfile(MPS, "mps", complex_fft=False, rnn=True, amp=True, channels_last=False, multi_device=False),
     XPU: DeviceProfile(XPU, "xpu", amp=False, channels_last=False, multi_device=False),
     CPU: DeviceProfile(CPU, "cpu", amp=False, channels_last=False, multi_device=False),
@@ -558,6 +559,7 @@ def prepare_device_alias(alias: str) -> str:
         cpu=profile_now.cpu_shim,
         sdpa=profile_now.sdpa_shim,
         rope=profile_now.rope_shim,
+        rope_kernel=profile_now.rope_kernel_shim,
     )
     # Recurrent cells: the fused _VF.lstm is both wrong and catastrophically slow
     # on BIREN (605 s for one (18, 57, 128) call), and the profile already says
