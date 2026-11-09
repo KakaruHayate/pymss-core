@@ -43,6 +43,7 @@ ENFLAME = "enflame"
 BIREN = "biren"
 ASCEND = "ascend"
 MLU = "mlu"
+MOORE = "moore"
 MPS = "mps"
 XPU = "xpu"
 CPU = "cpu"
@@ -64,6 +65,8 @@ DEVICE_ALIASES: tuple[str, ...] = (
     "metax",
     "enflame",
     "hygon",
+    "musa",
+    "moore",
 )
 
 #: ``--device`` alias -> vendor key.
@@ -82,6 +85,8 @@ ALIAS_TO_VENDOR: dict[str, str] = {
     "metax": METAX,
     "enflame": ENFLAME,
     "hygon": HYGON,
+    "musa": MOORE,
+    "moore": MOORE,
     "cpu": CPU,
 }
 
@@ -220,6 +225,35 @@ _PROFILES: dict[str, DeviceProfile] = {
     # Ascend's torch_npu builds ship npu_lstm/npu_gru without inference support
     # and lack a complex STFT path, so both fallbacks are part of the profile.
     ASCEND: DeviceProfile(ASCEND, "npu", plugin="torch_npu", complex_fft=False, rnn=False, multi_device=False),
+    # ---- Moore Threads (MUSA) ------------------------------------------------
+    # Measured on MTT S70 (7168 MiB, capability (2, 1)) + torch 2.7.1 +
+    # torch_musa 2.7.1 + MUSA SDK 4.3.0 + driver 3.3.0.
+    #
+    # That stack implements everything pymss needs natively -- native rfft/irfft
+    # (1.9e-07), complex-by-real multiply/divide (rel 0), complex cat/fill/copy,
+    # ``_thnn_fused_gru_cell`` and ``_native_multi_head_attention`` -- so this
+    # profile only carries the gaps that remain; every other flag keeps its
+    # native default:
+    #
+    # * ``fft_dtype_shim``: muFFT has no half-precision transforms below
+    #   mp 2.2, so spectra stay fp32.
+    # * ``scatter_add=False``: complex ``scatter_add_``/``index_add_`` are still
+    #   missing (the real ones work), so band folds take the real-plane path.
+    # * ``amp=False``: fp16 autocast aborts on real models -- MUDNN's fused fp16
+    #   conv raises "ConvNd MUDNN failed in: RunFusion" on conv1d/conv2d and
+    #   bfloat16 fails in datacast.  linear/matmul/layernorm fp16 do work.
+    #
+    # Not used, for the record: flash/efficient/cuDNN SDPA is gated on mp >= 2.2
+    # (unavailable on this capability whatever the version), and ``aten::rope``
+    # rejects every tensor layout we could construct, so rotary embeddings keep
+    # the hand-written implementation.
+    MOORE: DeviceProfile(
+        MOORE, "musa", plugin="torch_musa",
+        fft_dtype_shim=True,
+        scatter_add=False,
+        amp=False,
+        multi_device=False,
+    ),
     MPS: DeviceProfile(MPS, "mps", complex_fft=False, rnn=True, amp=True, channels_last=False, multi_device=False),
     XPU: DeviceProfile(XPU, "xpu", amp=False, channels_last=False, multi_device=False),
     CPU: DeviceProfile(CPU, "cpu", amp=False, channels_last=False, multi_device=False),
@@ -248,6 +282,7 @@ _DEVICE_TYPE_VENDOR: dict[str, str] = {
     "supa": BIREN,
     "mps": MPS,
     "xpu": XPU,
+    "musa": MOORE,
     "cpu": CPU,
 }
 
