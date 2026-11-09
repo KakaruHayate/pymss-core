@@ -226,34 +226,38 @@ _PROFILES: dict[str, DeviceProfile] = {
     # and lack a complex STFT path, so both fallbacks are part of the profile.
     ASCEND: DeviceProfile(ASCEND, "npu", plugin="torch_npu", complex_fft=False, rnn=False, multi_device=False),
     # ---- Moore Threads (MUSA) ------------------------------------------------
-    # Measured on MTT S70 (7168 MiB, capability (2, 1)) + torch 2.7.1 +
-    # torch_musa 2.7.1 + MUSA SDK 4.3.0 + driver 3.3.0.
+    # HARDWARE / STACK CEILING -- DO NOT RAISE WITHOUT RE-MEASURING
     #
-    # That stack implements everything pymss needs natively -- native rfft/irfft
-    # (1.9e-07), complex-by-real multiply/divide (rel 0), complex cat/fill/copy,
-    # ``_thnn_fused_gru_cell`` and ``_native_multi_head_attention`` -- so this
-    # profile only carries the gaps that remain; every other flag keeps its
-    # native default:
+    # Every flag below was measured on the first Moore Threads generation, the
+    # 春晓 (Chunxiao) architecture: MTT S70 and MTT S80 -- the only two parts of
+    # that generation sold as consumer desktop cards -- and the S3000 workstation
+    # part.  They all report compute capability (2, 1).
     #
-    # * ``fft_dtype_shim``: muFFT has no half-precision transforms below
-    #   mp 2.2, so spectra stay fp32.
-    # * ``scatter_add=False``: complex ``scatter_add_``/``index_add_`` are still
-    #   missing (the real ones work), so band folds take the real-plane path.
-    # * ``amp=False``: fp16 autocast aborts on real models -- MUDNN's fused fp16
-    #   conv raises "ConvNd MUDNN failed in: RunFusion" on conv1d/conv2d and
-    #   bfloat16 fails in datacast.  linear/matmul/layernorm fp16 do work.
+    # The versions named here are the highest that 春晓 can run:
     #
-    # Not used, for the record: flash/efficient/cuDNN SDPA is gated on mp >= 2.2
-    # (unavailable on this capability whatever the version), and ``aten::rope``
-    # rejects every tensor layout we could construct, so rotary embeddings keep
-    # the hand-written implementation.
-    MOORE: DeviceProfile(
-        MOORE, "musa", plugin="torch_musa",
-        fft_dtype_shim=True,
-        scatter_add=False,
-        amp=False,
-        multi_device=False,
-    ),
+    #   torch_musa  2.7.1        (2.9.x needs MUSA SDK >= 4.3.2, 2.11 needs >= 5.1)
+    #   MUSA SDK    4.3.0.CC2.1  (mcc 4.3.0, muDNN 3.1.0.CC2.1, driver 3.3.0)
+    #
+    # Raising either breaks 春晓 outright: the newer user-space SDK and driver do
+    # not run those cards, and torch_musa >= 2.9 refuses to load.
+    #
+    # Building torch_musa for this generation: the desktop cards (S70/S80) need
+    # USE_MCCL=0 because the SDK ships no MCCL library for them -- the S3000 does
+    # have MCCL -- and TORCH_MUSA_ARCH_LIST=21 keeps the build to mp_21.
+    #
+    # Generation 2 (capability (2, 2) and up) is where the capability-gated
+    # features live: flash SDPA needs mp >= 2.2, and so do the half-precision
+    # muFFT transforms that ``fft_dtype_shim`` works around.
+    #
+    # So if you arrive here with newer hardware, measure it first
+    # (``tools/musa_probe.py``) and add a generation-2 profile next to this one --
+    # do not edit this entry, or the port silently stops working on S70/S80/S3000.
+    #
+    # On the ceiling stack almost everything is native -- rfft/irfft 1.9e-07,
+    # complex-by-real rel 0, complex cat/fill/copy, ``_thnn_fused_gru_cell``,
+    # ``_native_multi_head_attention`` -- so only the three gaps annotated below
+    # are left; every other flag keeps its native default.
+    MOORE: DeviceProfile(MOORE, "musa", plugin="torch_musa", fft_dtype_shim=True, scatter_add=False, amp=False, multi_device=False),
     MPS: DeviceProfile(MPS, "mps", complex_fft=False, rnn=True, amp=True, channels_last=False, multi_device=False),
     XPU: DeviceProfile(XPU, "xpu", amp=False, channels_last=False, multi_device=False),
     CPU: DeviceProfile(CPU, "cpu", amp=False, channels_last=False, multi_device=False),
